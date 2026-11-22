@@ -147,6 +147,27 @@
       { id: 'u_17906827635', name: 'siti choiriyah', phone: '0823889012422', password: '2810882828108', points: 133, myVouchers: [{ id: 'v_welcome_1790682763527', name: 'Voucher Selamat Datang Rp 15.000', discountAmount: 15000, type: 'fixed' }] }
     ];
 
+    const HOME_BANNERS = [
+      {
+        id: 'b1',
+        image: 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1000&q=85',
+        tag: 'SPECIAL PROMO',
+        title: 'Kopi Pilihan & Kebab Hangat'
+      },
+      {
+        id: 'b2',
+        image: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=1000&q=85',
+        tag: 'SIGNATURE SERIES',
+        title: 'Nikmati Sensasi Kopi Gula Aren'
+      },
+      {
+        id: 'b3',
+        image: 'https://images.unsplash.com/photo-1515823064-d6e0c04616a7?auto=format&fit=crop&w=1000&q=85',
+        tag: 'MATCHA LOVERS',
+        title: 'Creamy Matcha Otentik Ruang Seduh'
+      }
+    ];
+
     const formatPhoneNumber = (phone) => {
       if (!phone) return '';
       let str = String(phone).replace(/[^0-9]/g, '');
@@ -165,17 +186,14 @@
       return `${year}-${month}-${day}`;
     };
 
-    // Helper ekstraksi tanggal fleksibel yang mengenali semua format tanggal dari Google Sheets
     const getLocalDateStr = (dateInput) => {
       if (!dateInput) return '';
       if (typeof dateInput === 'string') {
         const trimmed = dateInput.trim();
-        // Cek jika format YYYY-MM-DD
         const isoMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
         if (isoMatch) {
           return `${isoMatch[1]}-${String(isoMatch[2]).padStart(2, '0')}-${String(isoMatch[3]).padStart(2, '0')}`;
         }
-        // Cek jika format DD/MM/YYYY atau DD-MM-YYYY (khas Google Sheets format Indonesia)
         const dmyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
         if (dmyMatch) {
           return `${dmyMatch[3]}-${String(dmyMatch[2]).padStart(2, '0')}-${String(dmyMatch[1]).padStart(2, '0')}`;
@@ -287,6 +305,12 @@
       const [isEditMode, setIsEditMode] = useState(false);
       const [productModal, setProductModal] = useState({ open: false, item: null });
 
+      // Banner Image State (Editable via Admin / Custom URL)
+      const [customBannerUrl, setCustomBannerUrl] = useState(() => {
+        return localStorage.getItem('rs_home_banner_url') || '';
+      });
+      const [activeBannerIdx, setActiveBannerIdx] = useState(0);
+
       // Promos
       const [promosList, setPromosList] = useState([]);
       const [isLoadingPromos, setIsLoadingPromos] = useState(false);
@@ -335,6 +359,15 @@
       const [notification, setNotification] = useState(null);
       const [adminPromoModal, setAdminPromoModal] = useState({ open: false, item: null });
 
+      // Auto rotate banner
+      useEffect(() => {
+        if (customBannerUrl) return;
+        const timer = setInterval(() => {
+          setActiveBannerIdx(prev => (prev + 1) % HOME_BANNERS.length);
+        }, 4500);
+        return () => clearInterval(timer);
+      }, [customBannerUrl]);
+
       // Persistence
       useEffect(() => {
         if (currentUser) localStorage.setItem('rs_current_user', JSON.stringify(currentUser));
@@ -382,7 +415,6 @@
           }
 
           if (result && (result.success || Array.isArray(result.orders) || Array.isArray(result.menu))) {
-            // Normalisasi Menu
             const menuData = result.menu || result.menuItems;
             if (Array.isArray(menuData) && menuData.length > 0) {
               setMenuItems(menuData.map(m => ({
@@ -398,7 +430,6 @@
 
             if (Array.isArray(result.promos)) setPromosList(result.promos);
             
-            // Normalisasi Orders / Riwayat Pesanan dari Google Sheets
             const rawOrders = result.orders || result.riwayat || result.pesanan;
             if (Array.isArray(rawOrders)) {
               const normalizedOrders = rawOrders.map(o => {
@@ -433,7 +464,6 @@
               setOrders(normalizedOrders);
             }
 
-            // Normalisasi Belanja / Expenses
             const rawExpenses = result.expenses || result.belanja || result.pengeluaran;
             if (Array.isArray(rawExpenses)) {
               setExpenses(rawExpenses.map(e => ({
@@ -449,7 +479,6 @@
 
             if (result.shift && typeof result.shift.isOpen === 'boolean') setShiftState(result.shift);
             
-            // Tangkap Saldo Fisik Terakhir dari berbagai kemungkinan key return dari sheet
             const sheetSaldo = result.saldoFisikTerakhir !== undefined ? result.saldoFisikTerakhir
               : result.saldoFisik !== undefined ? result.saldoFisik
               : (result.mutasiKas && result.mutasiKas.saldoFisikTerakhir !== undefined) ? result.mutasiKas.saldoFisikTerakhir
@@ -705,29 +734,47 @@
         return Math.max(0, (posCashReceived || posFinalTotal) - posFinalTotal);
       }, [posCashReceived, posFinalTotal, posPaymentMethod]);
 
+      // Helper sanitasi teks untuk Telegram Markdown
+      const escapeTgMarkdown = (str) => {
+        return String(str || '').replace(/[_*[\]()~`>#+\-=|{}.!]/g, ' ');
+      };
+
       const sendTelegramNotification = async (order) => {
         if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) return;
 
         const itemsText = order.items.map(item => (
-          `• *${item.qty}x ${item.name}*\n  _Gula: ${item.sugarLevel || 'Normal'}_${item.notes ? `\n  _Catatan: ${item.notes}_` : ''}`
+          `• *${item.qty}x ${escapeTgMarkdown(item.name)}*\n  _Gula: ${escapeTgMarkdown(item.sugarLevel || 'Normal')}_${item.notes ? `\n  _Catatan: ${escapeTgMarkdown(item.notes)}_` : ''}`
         )).join('\n');
 
+        // Format nomor WA bersih & susun draf pesan WhatsApp tanpa karakter Markdown yang merusak URL Telegram
         const cleanPhone = String(order.customerPhone || '').replace(/[^0-9]/g, '');
-        const waPhone = cleanPhone.startsWith('0') ? '62' + cleanPhone.slice(1) : (cleanPhone.startsWith('62') ? cleanPhone : '');
+        const waPhone = cleanPhone.startsWith('0')
+          ? '62' + cleanPhone.slice(1)
+          : (cleanPhone.startsWith('62') ? cleanPhone : '');
+
         const waItemsPlain = order.items.map(item => (
-          `• ${item.qty}x ${item.name} (${item.sugarLevel || 'Normal'})${item.notes ? ` - Catatan: ${item.notes}` : ''}`
+          `- ${item.qty}x ${item.name} (${item.sugarLevel || 'Normal'})${item.notes ? ` [Catatan: ${item.notes}]` : ''}`
         )).join('\n');
+
+        const layananWaText = order.deliveryMethod === 'Diantar'
+          ? `Diantar ke (${order.deliveryAddress || '-'})`
+          : 'Ambil di Kasir';
+
         const waGreetingText =
-          `Halo Kak *${order.customerName}* 👋,\n` +
-          `Terima kasih sudah memesan di *Ruang Seduh* ☕!\n\n` +
+          `Halo Kak ${order.customerName},\n` +
+          `Terima kasih sudah memesan di Ruang Seduh!\n\n` +
           `Kami konfirmasi pesanan Kakak dengan detail berikut:\n` +
-          `*No. Pesanan:* ${order.orderNo}\n` +
-          `*Layanan:* ${order.deliveryMethod === 'Diantar' ? `Diantar ke (${order.deliveryAddress || '-'})` : 'Ambil di Kasir'}\n\n` +
-          `*Rincian Pesanan:*\n${waItemsPlain}\n\n` +
-          `*Total Tagihan:* Rp ${order.totalAmount.toLocaleString('id-ID')}\n\n` +
-          `Pesanan sedang kami proses ya Kak. Mohon ditunggu sebentar 🙏😊`;
+          `No. Pesanan: ${order.orderNo}\n` +
+          `Layanan: ${layananWaText}\n\n` +
+          `Rincian Pesanan:\n${waItemsPlain}\n\n` +
+          `Total Tagihan: Rp ${order.totalAmount.toLocaleString('id-ID')}\n\n` +
+          `Pesanan sedang kami proses ya Kak. Mohon ditunggu sebentar.`;
+
+        // Gunakan api.whatsapp.com/send agar teks panjang & baris baru tidak terpotong oleh parser link Telegram
+        const waFullUrl = `https://api.whatsapp.com/send?phone=${waPhone}&text=${encodeURIComponent(waGreetingText)}`;
+
         const waLinkText = (order.source !== 'pos_kasir' && waPhone.length >= 9)
-          ? `\n*Chat WA Pelanggan:* [Hubungi & Kirim Detail WA](https://wa.me/${waPhone}?text=${encodeURIComponent(waGreetingText)})`
+          ? `\n*Chat WA Pelanggan:* [Klik Kirim Pesan WA](${waFullUrl})`
           : '';
 
         const headerTitle = order.source === 'pos_kasir'
@@ -738,22 +785,22 @@
 
         const deliveryDetailText = order.source !== 'pos_kasir'
           ? `\n*Layanan:* *${order.deliveryMethod === 'Diantar' ? 'ANTAR (Delivery)' : 'JEMPUT (Ambil di Kasir)'}*` +
-            (order.deliveryMethod === 'Diantar' && order.deliveryAddress ? `\n*Alamat Antar:* ${order.deliveryAddress}` : '')
+            (order.deliveryMethod === 'Diantar' && order.deliveryAddress ? `\n*Alamat Antar:* ${escapeTgMarkdown(order.deliveryAddress)}` : '')
           : '';
 
         const message = `${headerTitle}\n\n` +
           `*No. Pesanan:* \`${order.orderNo}\`\n` +
           `*Tipe:* ${order.source === 'pos_kasir' ? 'Kasir Offline' : 'Online Web Pelanggan'}${deliveryDetailText}\n` +
-          `*Nama:* ${order.customerName}\n` +
+          `*Nama:* ${escapeTgMarkdown(order.customerName)}\n` +
           `*No. HP / ID:* ${order.customerPhone}${waLinkText}\n` +
-          `*Metode Bayar:* ${order.paymentMethod}\n\n` +
+          `*Metode Bayar:* ${escapeTgMarkdown(order.paymentMethod)}\n\n` +
           `*Detail Pesanan:*\n${itemsText}\n\n` +
           `-----------------------------------\n` +
           `*Subtotal:* Rp ${order.subtotal.toLocaleString('id-ID')}\n` +
           (order.discountAmount > 0 ? `*Diskon:* -Rp ${order.discountAmount.toLocaleString('id-ID')}\n` : '') +
           `*TOTAL:* *Rp ${order.totalAmount.toLocaleString('id-ID')}*\n` +
           `-----------------------------------\n` +
-          `📌 *Status:* ${order.status}`;
+          `📌 *Status:* ${escapeTgMarkdown(order.status)}`;
 
         try {
           await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN.trim()}/sendMessage`, {
@@ -1068,7 +1115,6 @@
         return Array.isArray(currentUser.myVouchers) ? currentUser.myVouchers : [];
       }, [currentUser]);
 
-      // Perhitungan Keuangan & Analitik Khusus Periode Kas (Hari Ini vs Kemarin)
       const kasPeriodDates = useMemo(() => {
         const todayStr = getISODateStr(new Date());
         const yesterday = new Date();
@@ -1094,7 +1140,6 @@
         });
       }, [expenses, kasPeriod, kasPeriodDates]);
 
-      // Rekap Shift Kasir Berjalan
       const currentShiftSummary = useMemo(() => {
         const shiftOpenTime = shiftState.isOpen && shiftState.openedAt ? new Date(shiftState.openedAt) : null;
         
@@ -1127,7 +1172,6 @@
         };
       }, [orders, expenses, shiftState]);
 
-      // Sinkronisasi Uang Fisik Kas: Mengikuti Mutlak Saldo Fisik Terakhir dari Google Sheets
       const financialSummary = useMemo(() => {
         const cashOrders = periodFilteredOrders.filter(o => o.status === 'Lunas' && o.paymentMethod === 'Tunai');
         const qrisOrders = periodFilteredOrders.filter(o => o.status === 'Lunas' && o.paymentMethod !== 'Tunai');
@@ -1136,13 +1180,9 @@
         const rawQrisTotal = qrisOrders.reduce((sum, o) => sum + o.totalAmount, 0);
         const totalExpenses = periodFilteredExpenses.reduce((sum, e) => sum + e.amount, 0);
 
-        // Saldo QRIS dapat ditarik hingga Rp 0
         const activeQrisBalance = Math.max(0, rawQrisTotal - qrisWithdrawn);
-
         const modalAwal = shiftState.isOpen ? (shiftState.modalAwal || 0) : 0;
         
-        // TOTAL UANG FISIK: Mengikuti Mutlak data Google Sheets Mutasi Kas (saldoFisikTerakhir)
-        // Jika data dari sheet belum termuat, gunakan perhitungan lokal sebagai cadangan
         const totalFisik = saldoFisikTerakhir !== 0 
           ? saldoFisikTerakhir 
           : (modalAwal + totalCashIn - totalExpenses);
@@ -1162,7 +1202,6 @@
         };
       }, [periodFilteredOrders, periodFilteredExpenses, shiftState, qrisWithdrawn, saldoFisikTerakhir]);
 
-      // Analisis Penjualan Makanan & Minuman
       const salesBreakdown = useMemo(() => {
         let foodPortions = 0;
         let foodRevenue = 0;
@@ -1225,7 +1264,6 @@
         };
       }, [periodFilteredOrders]);
 
-      // Buka Modal Shift dengan inisialisasi state
       const handleOpenShiftModal = () => {
         if (!shiftState.isOpen) {
           setShiftModalInputName(shiftState.cashierName || 'Kasir 1');
@@ -1236,7 +1274,6 @@
         setIsShiftModalOpen(true);
       };
 
-      // Mulai Shift Kasir Baru
       const handleStartShift = async () => {
         const name = shiftModalInputName.trim() || 'Kasir 1';
         const modal = Number(shiftModalInputModal) || 0;
@@ -1254,7 +1291,6 @@
         } catch (err) {}
       };
 
-      // Tutup Shift Kasir
       const handleCloseShift = async () => {
         const closedShift = {
           ...shiftState,
@@ -1271,7 +1307,6 @@
         } catch (err) {}
       };
 
-      // Salin Laporan Shift ke WhatsApp Owner
       const handleCopyWhatsAppReport = () => {
         const selisih = uangFisikNyataInput - currentShiftSummary.totalFisikDiMeja;
         const selisihText = selisih === 0 ? 'Pas (Rp 0)' : selisih > 0 ? `Lebih (+Rp ${selisih.toLocaleString('id-ID')})` : `Kurang (-Rp ${Math.abs(selisih).toLocaleString('id-ID')})`;
@@ -1307,7 +1342,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
         window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
       };
 
-      // Tarik Saldo QRIS
       const handleWithdrawQris = (amount) => {
         const withdrawVal = Number(amount);
         if (isNaN(withdrawVal) || withdrawVal <= 0) return showToast('Nominal penarikan tidak valid', 'error');
@@ -1319,6 +1353,9 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
         setWithdrawAmountInput('');
         showToast(`Penarikan QRIS sebesar Rp ${withdrawVal.toLocaleString('id-ID')} berhasil dicatat!`);
       };
+
+      const currentSlide = HOME_BANNERS[activeBannerIdx % HOME_BANNERS.length];
+      const displayedBannerImg = customBannerUrl || currentSlide.image;
 
       return (
         <div className="min-h-screen bg-slate-50 text-slate-800 transition-colors duration-200 font-sans pb-28 md:pb-8 relative overflow-x-hidden">
@@ -1433,8 +1470,8 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                 </nav>
 
                 {currentTab === 'home' && (
-                  <div className="space-y-5 pb-4">
-                    {/* Search Bar & Quick Scan/Reward Filter */}
+                  <div className="space-y-4 pb-4">
+                    {/* Search Bar & Quick Scan */}
                     <div className="flex items-center gap-2.5">
                       <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-4 top-3.5 text-slate-400" />
@@ -1465,60 +1502,99 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       </button>
                     </div>
 
-                    {/* Hero Banner Card (Seperti Referensi Gambar dengan Warna Utama #1565c0) */}
-                    <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#0d47a1] via-[#1565c0] to-[#1e88e5] text-white p-5 sm:p-6 shadow-xl">
-                      <div className="absolute -right-8 -bottom-8 w-44 h-44 rounded-full bg-sky-300/20 blur-2xl pointer-events-none"></div>
-                      <div className="absolute top-3 right-3 bg-white/15 backdrop-blur-md border border-white/25 px-3 py-1 rounded-full flex items-center gap-1.5">
-                        <Award className="w-3.5 h-3.5 text-amber-300" />
-                        <span className="text-[11px] font-extrabold text-white">
-                          {currentUser ? `${currentUser.points} PTS` : 'Member Baru'}
+                    {/* Visual Image Banner Carousel (Full Image Banner yang Bersih & Menarik) */}
+                    <div
+                      onClick={() => setCurrentTab('menu')}
+                      className="relative overflow-hidden rounded-[26px] h-44 sm:h-52 shadow-lg cursor-pointer group border border-slate-200/60 bg-slate-900"
+                    >
+                      <img
+                        src={displayedBannerImg}
+                        alt="Banner Promo Ruang Seduh"
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-slate-900/20 to-transparent"></div>
+
+                      <div className="absolute bottom-3.5 left-4 right-4 flex items-end justify-between gap-2">
+                        <div>
+                          <span className="inline-block bg-[#1565c0] text-white text-[9px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full shadow">
+                            {currentSlide.tag}
+                          </span>
+                          <h2 className="text-white font-extrabold text-sm sm:text-base mt-1 drop-shadow">
+                            {currentSlide.title}
+                          </h2>
+                        </div>
+                        <span className="bg-amber-400 text-slate-900 font-extrabold text-[11px] px-3.5 py-1.5 rounded-full shadow-md inline-flex items-center gap-1 shrink-0 group-hover:bg-amber-300 transition">
+                          Pesan <ChevronRight className="w-3.5 h-3.5" />
                         </span>
                       </div>
 
-                      <div className="relative z-10 flex items-center justify-between gap-3 pt-1">
-                        <div className="max-w-[58%] space-y-2">
-                          <h2 className="text-xl sm:text-2xl font-black leading-tight tracking-tight uppercase">
-                            RACIKAN KOPI.
-                            <br />
-                            RASA JUARA.
-                            <span className="block font-serif italic font-bold text-amber-300 normal-case text-lg sm:text-xl mt-0.5">
-                              Ruang Seduh
-                            </span>
-                          </h2>
-                          <p className="text-[11px] text-blue-100 leading-relaxed">
-                            {currentUser
-                              ? `Halo ${currentUser.name}, nikmati seduhan favoritmu hari ini.`
-                              : 'Menu favoritmu, diracik lebih spesial setiap hari.'}
-                          </p>
-                          <div className="pt-1">
+                      {/* Carousel Dots Indicator */}
+                      {!customBannerUrl && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute top-3 right-3 flex items-center gap-1.5 bg-black/30 backdrop-blur-sm px-2.5 py-1 rounded-full"
+                        >
+                          {HOME_BANNERS.map((b, i) => (
                             <button
+                              key={b.id}
                               type="button"
-                              onClick={() => setCurrentTab('menu')}
-                              className="bg-amber-400 hover:bg-amber-300 text-slate-900 font-extrabold text-xs px-4 py-2.5 rounded-full shadow-lg inline-flex items-center gap-2 active:scale-95 transition"
-                            >
-                              <span>Pesan Sekarang</span>
-                              <span className="w-5 h-5 rounded-full bg-white text-[#1565c0] flex items-center justify-center">
-                                <ChevronRight className="w-3.5 h-3.5" />
-                              </span>
-                            </button>
-                          </div>
+                              onClick={() => setActiveBannerIdx(i)}
+                              className={`h-1.5 rounded-full transition-all ${
+                                activeBannerIdx === i ? 'w-4 bg-amber-400' : 'w-1.5 bg-white/60'
+                              }`}
+                            />
+                          ))}
                         </div>
+                      )}
+                    </div>
 
-                        <div className="w-[40%] flex flex-col items-center justify-center relative">
-                          <img
-                            src={menuItems[0]?.image || 'https://images.bukaolshop.com/hosting/38154/7962862d9d07489063.png'}
-                            alt="Menu Spesial Ruang Seduh"
-                            className="w-28 h-28 sm:w-32 sm:h-32 object-contain drop-shadow-2xl transform -rotate-6 hover:rotate-0 transition duration-300"
-                          />
+                    {/* Kartu Saldo Poin Member (Terpisah & Ergonomis di Bawah Banner) */}
+                    <div className="bg-white rounded-2xl border border-blue-100 p-3.5 shadow-sm flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1565c0] flex items-center justify-center shrink-0 border border-blue-100">
+                          <Award className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                              {currentUser ? `Member ${memberLevel.name}` : 'Poin Loyalitas'}
+                            </span>
+                            {currentUser && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            )}
+                          </div>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-base sm:text-lg font-black text-[#1565c0]">
+                              {currentUser ? currentUser.points.toLocaleString('id-ID') : '0'}
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-500">PTS</span>
+                            {currentUser && (
+                              <span className="text-[11px] text-slate-400 truncate">• {currentUser.name}</span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
-                      {/* Carousel Dots Indicator */}
-                      <div className="flex items-center justify-center gap-1.5 mt-3">
-                        <span className="w-4 h-1.5 rounded-full bg-amber-400"></span>
-                        <span className="w-1.5 h-1.5 rounded-full bg-white/40"></span>
-                        <span className="w-1.5 h-1.5 rounded-full bg-white/40"></span>
-                        <span className="w-1.5 h-1.5 rounded-full bg-white/40"></span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {currentUser ? (
+                          <button
+                            type="button"
+                            onClick={() => setCurrentTab('reward')}
+                            className="bg-[#1565c0] hover:bg-blue-700 text-white text-[11px] font-bold px-3 py-2 rounded-xl shadow-sm inline-flex items-center gap-1 active:scale-95 transition"
+                          >
+                            <Gift className="w-3.5 h-3.5 text-amber-300" />
+                            <span>Tukar Poin</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => { setAuthMode('login'); setIsLoginModalOpen(true); }}
+                            className="bg-blue-50 hover:bg-blue-100 text-[#1565c0] border border-blue-200 text-[11px] font-bold px-3 py-2 rounded-xl inline-flex items-center gap-1 active:scale-95 transition"
+                          >
+                            <LogIn className="w-3.5 h-3.5" />
+                            <span>Klaim +100 PTS</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -2163,7 +2239,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                 {adminTab === 'riwayat' && (
                   <div className="space-y-4">
                     
-                    {/* SEARCH INPUT & REFRESH BUTTON */}
                     <div className="flex items-center gap-2">
                       <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-slate-400" />
@@ -2181,7 +2256,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                         )}
                       </div>
 
-                      {/* Tombol Refresh Data Orderan dari Google Sheets */}
                       <button
                         onClick={() => fetchAllDataFromSpreadsheet(true)}
                         disabled={isSyncingSheets}
@@ -2197,7 +2271,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       </button>
                     </div>
 
-                    {/* Filter Pills Hari Ini / Shift Aktif / Semua */}
                     <div className="flex items-center gap-2">
                       {['Hari Ini', 'Shift Aktif', 'Semua'].map(f => (
                         <button 
@@ -2210,7 +2283,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       ))}
                     </div>
 
-                    {/* Riwayat List Filter Calculation */}
                     {(() => {
                       const todayDateStr = kasPeriodDates.todayStr;
                       const filteredList = orders.filter(ord => {
@@ -2413,7 +2485,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                 {adminTab === 'brankas' && (
                   <div className="space-y-5">
                     
-                    {/* TOGGLE 2 PILIHAN: HARI INI VS KEMARIN */}
                     <div className="flex items-center justify-between bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
                       <div className="flex gap-1 w-full">
                         <button 
@@ -2431,6 +2502,38 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       </div>
                     </div>
 
+                    {/* Pengaturan Gambar Banner Halaman Home */}
+                    <div className="bg-white rounded-3xl p-4 border border-slate-200 shadow-sm space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-extrabold text-slate-800">🖼️ Pengaturan Banner Halaman Home</span>
+                        {customBannerUrl && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomBannerUrl('');
+                              localStorage.removeItem('rs_home_banner_url');
+                              showToast('Banner dikembalikan ke slide default');
+                            }}
+                            className="text-[11px] font-bold text-rose-500 hover:underline"
+                          >
+                            Reset Default
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          value={customBannerUrl}
+                          onChange={(e) => {
+                            setCustomBannerUrl(e.target.value);
+                            localStorage.setItem('rs_home_banner_url', e.target.value);
+                          }}
+                          placeholder="Tempel link gambar banner custom (https://...)"
+                          className="flex-1 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs outline-none focus:ring-2 focus:ring-[#1565c0]"
+                        />
+                      </div>
+                    </div>
+
                     {/* KAS UTAMA & BRANKAS OWNER */}
                     <div className="bg-white text-slate-800 rounded-3xl p-6 border border-blue-200 shadow-xl space-y-4">
                       <div className="flex items-center justify-between">
@@ -2444,7 +2547,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                         <span className="text-xs font-bold bg-blue-50 text-[#1565c0] px-3 py-1 rounded-full border border-blue-200">Owner</span>
                       </div>
 
-                      {/* JUMLAH UANG KAS FISIK MUTLAK DARI SPREADSHEET MUTASI KAS */}
                       <div className="pt-2 bg-blue-50/70 p-4 rounded-2xl border border-blue-200 space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] text-slate-600 font-bold uppercase tracking-wider">Total Uang Fisik Harus Ada di Laci:</span>
@@ -2471,7 +2573,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                         </div>
                       </div>
 
-                      {/* SALDO QRIS / BANK LENGKAP DENGAN TOMBOL TARIK UANG (BISA JADI 0) */}
                       <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200">
                         <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
                           <span className="text-[10px] text-slate-500 font-bold block uppercase">Modal Kas Awal</span>
@@ -2535,7 +2636,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       </div>
                     </div>
 
-                    {/* KARTU OMSET KOTOR & BERSIH */}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="bg-white border border-slate-200 p-4 rounded-3xl shadow-sm">
                         <span className="text-[10px] font-bold uppercase text-slate-400">Omset Kotor ({kasPeriod})</span>
@@ -2546,10 +2646,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                         <h3 className="text-xl font-black text-[#1565c0] mt-1">Rp {financialSummary.omsetBersih.toLocaleString('id-ID')}</h3>
                       </div>
                     </div>
-
-                    {/* ========================================================================= */}
-                    {/* BAGIAN VISUAL PENJUALAN MAKANAN & MINUMAN                                 */}
-                    {/* ========================================================================= */}
 
                     {/* 1. PENJUALAN MAKANAN */}
                     <div className="bg-[#F5F9FF] border border-sky-200/80 rounded-3xl p-5 shadow-sm space-y-4">
@@ -2791,11 +2887,10 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
           {/* MODALS SECTION                                                            */}
           {/* ========================================================================= */}
 
-          {/* MODAL BUKA SHIFT & REKAP SELESAI SHIFT PERSIS SESUAI GAMBAR */}
+          {/* MODAL BUKA SHIFT & REKAP SELESAI SHIFT */}
           {isShiftModalOpen && (
             <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
               {!shiftState.isOpen ? (
-                /* 1. TAMPILAN BUKA SHIFT KASIR BARU */
                 <div className="bg-white border border-slate-200 rounded-[32px] max-w-sm w-full p-6 space-y-5 shadow-2xl relative">
                   <button onClick={() => setIsShiftModalOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
                     <X className="w-5 h-5" />
@@ -2837,7 +2932,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       </div>
                     </div>
 
-                    {/* Quick Select Buttons: Rp 0, 50k, 100k, 200k */}
                     <div className="grid grid-cols-4 gap-2">
                       {[
                         { label: 'Rp 0', val: 0 },
@@ -2865,10 +2959,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                   </button>
                 </div>
               ) : (
-                /* 2. TAMPILAN REKAP & SELESAI SHIFT */
                 <div className="bg-white border border-slate-200 rounded-[32px] max-w-sm w-full p-5 space-y-4 shadow-2xl relative my-auto">
-                  
-                  {/* Header */}
                   <div className="flex items-center justify-between border-b pb-2">
                     <div className="flex items-center gap-2">
                       <span className="text-base">🏁</span>
@@ -2879,7 +2970,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     </button>
                   </div>
 
-                  {/* Info Kasir & Waktu */}
                   <div className="space-y-1 text-xs">
                     <div className="flex justify-between text-slate-500">
                       <span>Kasir Bertugas:</span>
@@ -2893,7 +2983,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     </div>
                   </div>
 
-                  {/* Rekap Kas Modal Kasir (Laci) */}
                   <div className="space-y-1.5 pt-1">
                     <span className="text-[10px] font-black text-sky-700 uppercase tracking-wider block">REKAP KAS MODAL KASIR (LACI):</span>
                     <div className="flex justify-between text-xs text-slate-600">
@@ -2910,7 +2999,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     </div>
                   </div>
 
-                  {/* Hasil Penjualan Shift Ini */}
                   <div className="space-y-1.5 pt-1">
                     <span className="text-[10px] font-black text-[#1565c0] uppercase tracking-wider block">HASIL PENJUALAN SHIFT INI:</span>
                     <div className="flex justify-between text-xs text-[#1565c0] font-medium">
@@ -2923,7 +3011,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     </div>
                   </div>
 
-                  {/* Total Uang Tunai Fisik di Meja */}
                   <div className="pt-2 border-t border-slate-100 space-y-0.5">
                     <div className="flex justify-between items-baseline">
                       <span className="font-extrabold text-xs text-slate-800">Total Uang Tunai Fisik di Meja:</span>
@@ -2932,7 +3019,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     <p className="text-[10px] text-slate-400 italic text-right">(Sisa Modal Laci + Penjualan Tunai)</p>
                   </div>
 
-                  {/* Input Hitung Uang Fisik Nyata di Kasir */}
                   <div className="space-y-1.5 pt-1">
                     <label className="text-[11px] font-bold text-slate-600 block">Hitung Uang Fisik Nyata di Kasir (Rp)</label>
                     <div className="relative">
@@ -2952,7 +3038,6 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     </div>
                   </div>
 
-                  {/* Action Buttons */}
                   <div className="space-y-2 pt-2">
                     <button 
                       onClick={handleCopyWhatsAppReport}
@@ -2974,7 +3059,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
             </div>
           )}
 
-          {/* MODAL TARIK SALDO QRIS (BISA DITARIK HINGGA JADI RP 0) */}
+          {/* MODAL TARIK SALDO QRIS */}
           {isWithdrawModalOpen && (
             <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-white border border-slate-200 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
