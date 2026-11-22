@@ -305,6 +305,10 @@
       const [showVoucherSelector, setShowVoucherSelector] = useState(false);
       const [promoInput, setPromoInput] = useState('');
       const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+      const [deliveryMethod, setDeliveryMethod] = useState(null);
+      const [deliveryAddress, setDeliveryAddress] = useState('');
+      const [isDeliveryModalOpen, setIsDeliveryModalOpen] = useState(false);
+      const [pendingProductAction, setPendingProductAction] = useState(false);
 
       // POS Kasir
       const [posCategory, setPosCategory] = useState('Semua');
@@ -708,13 +712,36 @@
 
         const cleanPhone = String(order.customerPhone || '').replace(/[^0-9]/g, '');
         const waPhone = cleanPhone.startsWith('0') ? '62' + cleanPhone.slice(1) : (cleanPhone.startsWith('62') ? cleanPhone : '');
+        const waItemsPlain = order.items.map(item => (
+          `• ${item.qty}x ${item.name} (${item.sugarLevel || 'Normal'})${item.notes ? ` - Catatan: ${item.notes}` : ''}`
+        )).join('\n');
+        const waGreetingText =
+          `Halo Kak *${order.customerName}* 👋,\n` +
+          `Terima kasih sudah memesan di *Ruang Seduh* ☕!\n\n` +
+          `Kami konfirmasi pesanan Kakak dengan detail berikut:\n` +
+          `*No. Pesanan:* ${order.orderNo}\n` +
+          `*Layanan:* ${order.deliveryMethod === 'Diantar' ? `Diantar ke (${order.deliveryAddress || '-'})` : 'Ambil di Kasir'}\n\n` +
+          `*Rincian Pesanan:*\n${waItemsPlain}\n\n` +
+          `*Total Tagihan:* Rp ${order.totalAmount.toLocaleString('id-ID')}\n\n` +
+          `Pesanan sedang kami proses ya Kak. Mohon ditunggu sebentar 🙏😊`;
         const waLinkText = (order.source !== 'pos_kasir' && waPhone.length >= 9)
-          ? `\n*Chat WA Pelanggan:* [Hubungi WhatsApp](https://wa.me/${waPhone})`
+          ? `\n*Chat WA Pelanggan:* [Hubungi & Kirim Detail WA](https://wa.me/${waPhone}?text=${encodeURIComponent(waGreetingText)})`
           : '';
 
-        const message = `🚨 *PESANAN BARU RUANG SEDUH!* ☕\n\n` +
+        const headerTitle = order.source === 'pos_kasir'
+          ? `🚨 *PESANAN KASIR OFFLINE - RUANG SEDUH!* ☕`
+          : (order.deliveryMethod === 'Diantar'
+              ? `🛵 *PESANAN BARU: ANTAR (DELIVERY)* ☕`
+              : `🏪 *PESANAN BARU: JEMPUT (AMBIL DI KASIR)* ☕`);
+
+        const deliveryDetailText = order.source !== 'pos_kasir'
+          ? `\n*Layanan:* *${order.deliveryMethod === 'Diantar' ? 'ANTAR (Delivery)' : 'JEMPUT (Ambil di Kasir)'}*` +
+            (order.deliveryMethod === 'Diantar' && order.deliveryAddress ? `\n*Alamat Antar:* ${order.deliveryAddress}` : '')
+          : '';
+
+        const message = `${headerTitle}\n\n` +
           `*No. Pesanan:* \`${order.orderNo}\`\n` +
-          `*Tipe:* ${order.source === 'pos_kasir' ? 'Kasir Offline' : 'Online Web Pelanggan'}\n` +
+          `*Tipe:* ${order.source === 'pos_kasir' ? 'Kasir Offline' : 'Online Web Pelanggan'}${deliveryDetailText}\n` +
           `*Nama:* ${order.customerName}\n` +
           `*No. HP / ID:* ${order.customerPhone}${waLinkText}\n` +
           `*Metode Bayar:* ${order.paymentMethod}\n\n` +
@@ -754,9 +781,13 @@
         const qrReceiptCode = `QR-POINT-${orderNo}-${Date.now().toString().slice(-4)}`;
         const potentialPoints = Math.floor(finalTotalAmount / 1000);
 
+        const chosenDelivery = deliveryMethod || 'Ambil di Kasir';
+
         const newOrder = {
           orderNo,
           source: 'customer_web',
+          deliveryMethod: chosenDelivery,
+          deliveryAddress: chosenDelivery === 'Diantar' ? deliveryAddress : '',
           customerName: currentUser.name,
           customerPhone: currentUser.phone,
           items: [...cart],
@@ -764,7 +795,7 @@
           discountAmount,
           appliedVoucher: selectedVoucher ? selectedVoucher.name : null,
           totalAmount: finalTotalAmount,
-          paymentMethod: 'Bayar di Kasir',
+          paymentMethod: chosenDelivery === 'Diantar' ? 'Bayar saat Diantar / COD' : 'Bayar di Kasir',
           cashReceived: 0,
           change: 0,
           status: 'Menunggu Konfirmasi',
@@ -801,9 +832,11 @@
         setActiveOrderReceipt(newOrder);
         setCart([]);
         setSelectedVoucher(null);
+        setDeliveryMethod(null);
+        setDeliveryAddress('');
         setIsCartOpen(false);
         setCheckoutStep('cart');
-        showToast(`Pesanan ${orderNo} berhasil dibuat & masuk antrean Kasir! ☕`, 'new-order');
+        showToast(`Pesanan ${orderNo} (${chosenDelivery === 'Diantar' ? 'ANTAR' : 'JEMPUT'}) berhasil dibuat! ☕`, 'new-order');
 
         try {
           await postToDatabase({ action: 'saveOrder', order: newOrder });
@@ -877,9 +910,9 @@
 
       const memberLevel = useMemo(() => {
         const pts = currentUser ? currentUser.points : 0;
-        if (pts >= 1000) return { name: 'Platinum', badge: 'bg-sky-500 text-white', color: 'from-blue-200 via-sky-300 to-blue-500' };
-        if (pts >= 500) return { name: 'Gold', badge: 'bg-blue-600 text-white', color: 'from-blue-300 to-sky-500' };
-        return { name: 'Silver', badge: 'bg-slate-400 text-white', color: 'from-slate-200 to-blue-200' };
+        if (pts >= 1000) return { name: 'Platinum', badge: 'bg-sky-500 text-white', color: 'from-blue-100 via-sky-200 to-blue-300' };
+        if (pts >= 500) return { name: 'Gold', badge: 'bg-[#1565c0] text-white', color: 'from-blue-200 to-sky-300' };
+        return { name: 'Silver', badge: 'bg-slate-500 text-white', color: 'from-slate-200 to-slate-300' };
       }, [currentUser]);
 
       const handleOpenDetail = (product) => {
@@ -889,8 +922,9 @@
         setItemQty(1);
       };
 
-      const handleAddToCart = () => {
+      const executeAddToCart = (chosenMethod) => {
         if (!selectedProduct) return;
+        const activeMethod = chosenMethod || deliveryMethod || 'Ambil di Kasir';
         const cartItem = {
           cartItemId: Date.now().toString(),
           productId: selectedProduct.id,
@@ -915,7 +949,17 @@
         });
 
         setSelectedProduct(null);
-        showToast(`${itemQty}x "${selectedProduct.name}" ditambahkan ke keranjang!`);
+        showToast(`${itemQty}x "${selectedProduct.name}" (${activeMethod === 'Diantar' ? 'Diantar' : 'Ambil di Kasir'}) masuk keranjang!`);
+      };
+
+      const handleAddToCart = () => {
+        if (!selectedProduct) return;
+        if (!deliveryMethod) {
+          setPendingProductAction(true);
+          setIsDeliveryModalOpen(true);
+          return;
+        }
+        executeAddToCart(deliveryMethod);
       };
 
       const updateCartQty = (cartItemId, delta) => {
@@ -1275,7 +1319,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
       };
 
       return (
-        <div className={`min-h-screen ${darkMode ? 'bg-blue-50/40 text-slate-800' : 'bg-slate-50 text-slate-800'} transition-colors duration-200 font-sans pb-28 md:pb-8 relative overflow-x-hidden`}>
+        <div className="min-h-screen bg-slate-50 text-slate-800 transition-colors duration-200 font-sans pb-28 md:pb-8 relative overflow-x-hidden">
           
           {/* TOAST NOTIFIKASI */}
           {notification && (
@@ -1286,26 +1330,26 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
           )}
 
           {/* HEADER UTAMA */}
-          <header className={`sticky top-0 z-30 backdrop-blur-md border-b ${darkMode ? 'bg-white/95 border-blue-100' : 'bg-white/90 border-slate-200'} px-4 py-3 shadow-sm`}>
+          <header className="sticky top-0 z-30 backdrop-blur-md border-b bg-white/95 border-slate-200 px-4 py-3 shadow-sm">
             <div className="max-w-xl mx-auto flex items-center justify-between">
               
               <div className="flex items-center gap-3 cursor-pointer select-none group" onClick={handleLogoClick}>
-                <div className={`w-10 h-10 rounded-xl ${activeRole === 'admin' ? 'bg-gradient-to-tr from-[#1565c0] to-sky-400' : 'bg-gradient-to-tr from-[#1565c0] to-blue-400'} flex items-center justify-center text-white shadow-md`}>
+                <div className={`w-10 h-10 rounded-xl ${activeRole === 'admin' ? 'bg-gradient-to-tr from-[#1565c0] to-blue-400' : 'bg-gradient-to-tr from-[#1565c0] to-sky-400'} flex items-center justify-center text-white shadow-md`}>
                   {activeRole === 'admin' ? <Store className="w-6 h-6 text-white" /> : <Coffee className="w-6 h-6 text-sky-100" />}
                 </div>
                 <div>
                   <h1 className="font-extrabold text-xl tracking-tight text-[#1565c0] leading-none flex items-center gap-1.5">
                     {activeRole === 'admin' ? (
                       <>
-                        POS PINTAR <span className="text-[10px] bg-blue-500/20 text-[#1565c0] px-1.5 py-0.5 rounded font-bold uppercase">KASIR AKTIF</span>
+                        POS PINTAR <span className="text-[10px] bg-blue-500/15 text-[#1565c0] px-1.5 py-0.5 rounded font-bold uppercase">KASIR AKTIF</span>
                       </>
                     ) : (
                       <>
-                        RUANG SEDUH <span className="text-[10px] bg-sky-500/20 text-[#1565c0] px-1.5 py-0.5 rounded font-bold uppercase">PREMIUM</span>
+                        RUANG SEDUH <span className="text-[10px] bg-sky-500/15 text-[#1565c0] px-1.5 py-0.5 rounded font-bold uppercase">PREMIUM</span>
                       </>
                     )}
                   </h1>
-                  <p className="text-[11px] text-slate-400 font-medium tracking-wide flex items-center gap-1.5">
+                  <p className="text-[11px] text-slate-500 font-medium tracking-wide flex items-center gap-1.5">
                     {activeRole === 'admin' ? (
                       <span className="flex items-center gap-1 text-slate-500">
                         <span className={`w-2 h-2 rounded-full ${shiftState.isOpen ? 'bg-[#1565c0] animate-pulse' : 'bg-rose-500'}`}></span>
@@ -1345,12 +1389,12 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                   </button>
                 )}
 
-                <button onClick={() => setDarkMode(!darkMode)} className={`p-2.5 rounded-xl border ${darkMode ? 'bg-blue-50 border-blue-200 text-[#1565c0]' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
-                  {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                <button onClick={() => setDarkMode(!darkMode)} className="p-2.5 rounded-xl border bg-blue-50 border-blue-200 text-[#1565c0]">
+                  <Sun className="w-5 h-5" />
                 </button>
 
                 {activeRole === 'admin' && (
-                  <button onClick={handleOpenShiftModal} title="Kelola Buka/Tutup Shift" className="p-2.5 bg-blue-50 text-[#1565c0] rounded-xl border border-blue-200">
+                  <button onClick={handleOpenShiftModal} title="Kelola Buka/Tutup Shift" className="p-2.5 bg-blue-100 text-[#1565c0] rounded-xl border border-blue-200">
                     <RefreshCw className="w-5 h-5" />
                   </button>
                 )}
@@ -1374,7 +1418,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       { id: 'orders', label: 'Pesanan Saya', icon: Clock },
                       { id: 'profile', label: 'Profil Member', icon: User }
                     ].map(tab => (
-                      <button key={tab.id} onClick={() => setCurrentTab(tab.id)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition ${currentTab === tab.id ? 'bg-[#1565c0] text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}`}>
+                      <button key={tab.id} onClick={() => setCurrentTab(tab.id)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm transition ${currentTab === tab.id ? 'bg-[#1565c0] text-white shadow-md' : 'text-slate-600 hover:bg-blue-50'}`}>
                         <tab.icon className="w-4 h-4" /> {tab.label}
                       </button>
                     ))}
@@ -1382,7 +1426,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
 
                   <button onClick={() => { setIsCartOpen(true); setCheckoutStep('cart'); }} className="flex items-center gap-2 bg-sky-500 text-white px-4 py-2.5 rounded-xl font-bold text-sm shadow">
                     <ShoppingCart className="w-4 h-4" /> <span>Keranjang</span>
-                    {totalCartCount > 0 && <span className="bg-[#1565c0] text-white text-xs px-2 py-0.5 rounded-full font-black">{totalCartCount}</span>}
+                    {totalCartCount > 0 && <span className="bg-white text-[#1565c0] text-xs px-2 py-0.5 rounded-full font-black">{totalCartCount}</span>}
                   </button>
                 </nav>
 
@@ -1411,7 +1455,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     {!currentUser && (
                       <div className="bg-[#1565c0] text-white p-5 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg border border-blue-400">
                         <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-2xl bg-white/20 text-sky-200 flex items-center justify-center font-bold"><UserCheck className="w-6 h-6" /></div>
+                          <div className="w-12 h-12 rounded-2xl bg-white/20 text-white flex items-center justify-center font-bold"><UserCheck className="w-6 h-6" /></div>
                           <div>
                             <h3 className="font-bold text-sm text-sky-100">Belum Punya Akun Member?</h3>
                             <p className="text-xs text-blue-100 mt-0.5">Daftar akun sekarang untuk mendapatkan +100 Poin Selamat Datang!</p>
@@ -1424,7 +1468,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     <div className="grid grid-cols-3 gap-3">
                       <button onClick={() => setCurrentTab('menu')} className="p-4 rounded-2xl bg-[#1565c0] text-white flex flex-col items-center gap-2 shadow"><Coffee className="w-6 h-6 text-sky-200" /><span className="text-xs font-bold">Pesan Minuman</span></button>
                       <button onClick={() => setQrModalOpen(true)} className="p-4 rounded-2xl bg-sky-500 text-white flex flex-col items-center gap-2 shadow"><QrCode className="w-6 h-6" /><span className="text-xs font-bold">Scan QR Poin</span></button>
-                      <button onClick={() => setCurrentTab('reward')} className="p-4 rounded-2xl bg-blue-900 text-white flex flex-col items-center gap-2 shadow"><Gift className="w-6 h-6 text-sky-300" /><span className="text-xs font-bold">Poin & Reward</span></button>
+                      <button onClick={() => setCurrentTab('reward')} className="p-4 rounded-2xl bg-blue-50 text-[#1565c0] border border-blue-200 flex flex-col items-center gap-2 shadow-sm"><Gift className="w-6 h-6 text-[#1565c0]" /><span className="text-xs font-bold">Poin & Reward</span></button>
                     </div>
 
                     <div>
@@ -1452,7 +1496,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                   <div className="space-y-5">
                     <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
                       {['Semua', 'Signature', 'Coffee', 'Non Coffee', 'Fresh Drink', 'Cemilan'].map(cat => (
-                        <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${selectedCategory === cat ? 'bg-[#1565c0] text-white shadow' : 'bg-white text-slate-600 border'}`}>
+                        <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${selectedCategory === cat ? 'bg-[#1565c0] text-white shadow' : 'bg-white text-slate-600 border border-slate-200'}`}>
                           {cat}
                         </button>
                       ))}
@@ -1483,7 +1527,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
 
                 {currentTab === 'reward' && (
                   <div className="space-y-6">
-                    <div className="bg-gradient-to-r from-[#1565c0] to-blue-700 text-white p-6 rounded-3xl border border-blue-400 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
+                    <div className="bg-gradient-to-r from-[#1565c0] to-blue-600 text-white p-6 rounded-3xl border border-blue-400 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
                       <div>
                         <span className="text-xs text-sky-200 font-bold uppercase tracking-widest">Program Loyalitas Member</span>
                         <h2 className="text-2xl font-bold mt-1">Tukar Poin Reward</h2>
@@ -1514,7 +1558,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                           {promosList.map(p => {
                             const isUsed = currentUser?.usedPromoCodes?.includes(p.code.toUpperCase());
                             return (
-                              <div key={p.id} className="bg-white border border-blue-500/30 rounded-2xl p-4 shadow-sm flex flex-col justify-between space-y-3 relative overflow-hidden">
+                              <div key={p.id} className="bg-white border border-blue-200 rounded-2xl p-4 shadow-sm flex flex-col justify-between space-y-3 relative overflow-hidden">
                                 <div className="flex justify-between items-start">
                                   <div>
                                     <span className="text-[10px] font-bold text-[#1565c0] bg-blue-50 px-2 py-0.5 rounded uppercase font-mono">{p.code}</span>
@@ -1531,7 +1575,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                                   </span>
                                   <button 
                                     onClick={() => { navigator.clipboard?.writeText?.(p.code); showToast(`Kode promo "${p.code}" disalin!`); }}
-                                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 active:scale-95 transition"
+                                    className="bg-blue-50 hover:bg-blue-100 text-[#1565c0] px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 active:scale-95 transition"
                                   >
                                     <Copy className="w-3.5 h-3.5" /> Salin Kode
                                   </button>
@@ -1554,7 +1598,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                           return (
                             <div key={reward.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-sm">
                               <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 rounded-xl bg-blue-50 text-[#1565c0] flex items-center justify-center font-bold"><Gift className="w-6 h-6" /></div>
+                                <div className="w-12 h-12 rounded-xl bg-blue-500/10 text-[#1565c0] flex items-center justify-center font-bold"><Gift className="w-6 h-6" /></div>
                                 <div>
                                   <span className="text-[10px] font-bold uppercase text-slate-400">{reward.type}</span>
                                   <h4 className="font-bold text-sm leading-snug">{reward.name}</h4>
@@ -1590,12 +1634,12 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                         <div key={order.orderNo} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
                           <div className="flex justify-between items-center border-b pb-2">
                             <span className="font-mono text-xs font-black text-[#1565c0]">{order.orderNo}</span>
-                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${order.status === 'Lunas' ? 'bg-blue-100 text-blue-800' : 'bg-sky-100 text-sky-800'}`}>{order.status}</span>
+                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${order.status === 'Lunas' ? 'bg-blue-100 text-[#1565c0]' : 'bg-sky-100 text-sky-800'}`}>{order.status}</span>
                           </div>
                           <p className="text-xs text-slate-500">{order.items?.map(i => `${i.qty}x ${i.name}`).join(', ')}</p>
                           <div className="flex justify-between items-center pt-2">
                             <span className="text-sm font-black text-[#1565c0]">Rp {order.totalAmount?.toLocaleString('id-ID')}</span>
-                            <button onClick={() => setActiveOrderReceipt(order)} className="bg-slate-100 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1"><QrCode className="w-3.5 h-3.5 text-[#1565c0]" /> Struk QR</button>
+                            <button onClick={() => setActiveOrderReceipt(order)} className="bg-blue-50 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 text-[#1565c0]"><QrCode className="w-3.5 h-3.5 text-[#1565c0]" /> Struk QR</button>
                           </div>
                         </div>
                       ))
@@ -1612,7 +1656,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                           <h2 className="text-xl font-bold mt-3">{currentUser.name}</h2>
                           <p className="text-xs text-slate-500">{currentUser.phone}</p>
 
-                          <div className="mt-4 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-50 text-[#1565c0] font-bold text-xs border border-blue-200">
+                          <div className="mt-4 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/10 text-[#1565c0] font-bold text-xs border border-blue-500/20">
                             <Award className="w-4 h-4" /> Tier Level: Member {memberLevel.name}
                           </div>
 
@@ -1642,7 +1686,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       </div>
                     ) : (
                       <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center space-y-4 shadow-md">
-                        <div className="w-20 h-20 rounded-full bg-slate-100 mx-auto flex items-center justify-center text-slate-400"><UserCheck className="w-10 h-10" /></div>
+                        <div className="w-20 h-20 rounded-full bg-blue-50 mx-auto flex items-center justify-center text-[#1565c0]"><UserCheck className="w-10 h-10" /></div>
                         <div><h2 className="text-xl font-bold">Anda Belum Login</h2><p className="text-xs text-slate-400 mt-1">Masuk untuk kumpulkan poin reward & voucher.</p></div>
                         <button onClick={() => { setAuthMode('login'); setIsLoginModalOpen(true); }} className="bg-[#1565c0] text-white font-bold px-6 py-3 rounded-xl text-xs shadow-lg">Login / Daftar Member Sekarang</button>
                       </div>
@@ -1713,13 +1757,13 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                 {adminTab === 'kasir' && (
                   <div className="space-y-4">
                     
-                    <div className="bg-gradient-to-br from-[#1565c0] to-blue-800 text-white p-4 rounded-3xl border border-blue-400 shadow-xl space-y-3">
+                    <div className="bg-gradient-to-r from-[#1565c0] to-blue-600 text-white p-4 rounded-3xl border border-blue-400 shadow-xl space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className="w-2 h-2 rounded-full bg-sky-300 animate-pulse"></span>
-                          <span className="text-xs font-extrabold text-sky-200 uppercase tracking-wider">Voice Order Pintar</span>
+                          <span className="text-xs font-extrabold text-sky-100 uppercase tracking-wider">Voice Order Pintar</span>
                         </div>
-                        <span className="text-[10px] bg-white/15 text-blue-100 px-2 py-0.5 rounded-full font-medium">Multi Menu Gercep</span>
+                        <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-medium">Multi Menu Gercep</span>
                       </div>
                       <p className="text-xs text-blue-100 italic">
                         Diktekan pesanan, contoh: <span className="text-white font-bold">"aren 3 kebab daging 2 teh biasa 1"</span>
@@ -1776,7 +1820,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                         value={posSearchQuery} 
                         onChange={(e) => setPosSearchQuery(e.target.value)} 
                         placeholder="Cari minuman atau kebab..." 
-                        className="w-full pl-10 pr-10 py-2.5 rounded-2xl border bg-white text-xs outline-none focus:ring-2 focus:ring-[#1565c0]"
+                        className="w-full pl-10 pr-10 py-2.5 rounded-2xl border border-slate-200 bg-white text-xs outline-none focus:ring-2 focus:ring-[#1565c0]"
                       />
                       {posSearchQuery && (
                         <button onClick={() => setPosSearchQuery('')} className="absolute right-3.5 top-3 text-slate-400">
@@ -1820,7 +1864,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                                 isEditMode 
                                   ? 'border-sky-400 ring-2 ring-sky-400/30 bg-sky-50/30' 
                                   : inCart 
-                                    ? 'border-[#1565c0] ring-2 ring-blue-500/20 bg-blue-50/30' 
+                                    ? 'border-[#1565c0] ring-2 ring-blue-500/20 bg-blue-50/40' 
                                     : 'border-slate-200 hover:border-[#1565c0]'
                               }`}
                             >
@@ -1832,7 +1876,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
 
                               <div>
                                 <div className="flex items-center justify-between mb-2 pointer-events-none">
-                                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${item.category === 'Cemilan' ? 'bg-sky-100 text-sky-800' : 'bg-blue-100 text-blue-800'}`}>
+                                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${item.category === 'Cemilan' ? 'bg-sky-100 text-sky-800' : 'bg-blue-100 text-[#1565c0]'}`}>
                                     {item.category === 'Cemilan' ? 'MAKANAN' : item.category.toUpperCase()}
                                   </span>
                                   {!isEditMode && (
@@ -1904,7 +1948,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                           value={historySearch} 
                           onChange={(e) => setHistorySearch(e.target.value)} 
                           placeholder="Cari Riwayat Order Kasir / No. HP..." 
-                          className="w-full pl-10 pr-10 py-2.5 rounded-2xl border bg-white text-xs outline-none focus:ring-2 focus:ring-[#1565c0]"
+                          className="w-full pl-10 pr-10 py-2.5 rounded-2xl border border-slate-200 bg-white text-xs outline-none focus:ring-2 focus:ring-[#1565c0]"
                         />
                         {historySearch && (
                           <button onClick={() => setHistorySearch('')} className="absolute right-3.5 top-3 text-slate-400">
@@ -1972,7 +2016,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                         <>
                           <div className="flex items-center justify-between text-xs font-bold text-slate-500 px-1">
                             <span>Riwayat Order ({historyFilter})</span>
-                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${filteredList.length > 0 ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-600'}`}>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-extrabold ${filteredList.length > 0 ? 'bg-blue-100 text-[#1565c0]' : 'bg-slate-200 text-slate-600'}`}>
                               {filteredList.length} Pesanan
                             </span>
                           </div>
@@ -1999,7 +2043,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                                     
                                     <div className="flex items-start justify-between">
                                       <div className="flex items-center gap-3">
-                                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold ${isWebOrder ? 'bg-sky-100 text-sky-800' : 'bg-blue-100 text-blue-800'}`}>
+                                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold ${isWebOrder ? 'bg-sky-100 text-sky-800' : 'bg-blue-100 text-[#1565c0]'}`}>
                                           {isWebOrder ? <ShoppingBag className="w-5 h-5" /> : <User className="w-5 h-5" />}
                                         </div>
                                         <div>
@@ -2019,7 +2063,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
 
                                       <div className="text-right">
                                         <span className="text-sm font-black text-slate-900 block">Rp {order.totalAmount?.toLocaleString('id-ID')}</span>
-                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${order.status === 'Lunas' ? 'bg-blue-100 text-blue-800' : 'bg-sky-100 text-sky-800'}`}>
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${order.status === 'Lunas' ? 'bg-blue-100 text-[#1565c0]' : 'bg-sky-100 text-sky-800'}`}>
                                           {order.paymentMethod} • {order.status}
                                         </span>
                                       </div>
@@ -2150,13 +2194,13 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       <div className="flex gap-1 w-full">
                         <button 
                           onClick={() => setKasPeriod('Hari Ini')} 
-                          className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${kasPeriod === 'Hari Ini' ? 'bg-[#1565c0] text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
+                          className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${kasPeriod === 'Hari Ini' ? 'bg-[#1565c0] text-white shadow' : 'text-slate-600 hover:bg-blue-50'}`}
                         >
                           📅 Hari Ini
                         </button>
                         <button 
                           onClick={() => setKasPeriod('Kemarin')} 
-                          className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${kasPeriod === 'Kemarin' ? 'bg-[#1565c0] text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}
+                          className={`flex-1 py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${kasPeriod === 'Kemarin' ? 'bg-[#1565c0] text-white shadow' : 'text-slate-600 hover:bg-blue-50'}`}
                         >
                           📅 Kemarin
                         </button>
@@ -2164,59 +2208,59 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     </div>
 
                     {/* KAS UTAMA & BRANKAS OWNER */}
-                    <div className="bg-gradient-to-br from-[#1565c0] via-blue-700 to-blue-900 text-white rounded-3xl p-6 border border-blue-400 shadow-xl space-y-4">
+                    <div className="bg-white text-slate-800 rounded-3xl p-6 border border-blue-200 shadow-xl space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-lg bg-white/20 text-sky-200 flex items-center justify-center font-bold">💰</div>
+                          <div className="w-8 h-8 rounded-lg bg-blue-500/15 text-[#1565c0] flex items-center justify-center font-bold">💰</div>
                           <div>
-                            <span className="text-xs font-black uppercase text-sky-200">Kas Utama & Brankas Owner</span>
-                            <p className="text-[10px] text-blue-100">Uang Operasional & Setoran Kedai ({kasPeriod})</p>
+                            <span className="text-xs font-black uppercase text-[#1565c0]">Kas Utama & Brankas Owner</span>
+                            <p className="text-[10px] text-slate-500">Uang Operasional & Setoran Kedai ({kasPeriod})</p>
                           </div>
                         </div>
-                        <span className="text-xs font-bold bg-white/15 text-white px-3 py-1 rounded-full border border-white/25">Owner</span>
+                        <span className="text-xs font-bold bg-blue-50 text-[#1565c0] px-3 py-1 rounded-full border border-blue-200">Owner</span>
                       </div>
 
                       {/* JUMLAH UANG KAS FISIK MUTLAK DARI SPREADSHEET MUTASI KAS */}
-                      <div className="pt-2 bg-white/10 p-4 rounded-2xl border border-white/20 space-y-2">
+                      <div className="pt-2 bg-blue-50/70 p-4 rounded-2xl border border-blue-200 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] text-blue-100 font-bold uppercase tracking-wider">Total Uang Fisik Harus Ada di Laci:</span>
-                          <span className="text-[10px] font-extrabold text-[#1565c0] bg-white border border-blue-200 px-2 py-0.5 rounded-full">SINKRON MUTASI KAS</span>
+                          <span className="text-[11px] text-slate-600 font-bold uppercase tracking-wider">Total Uang Fisik Harus Ada di Laci:</span>
+                          <span className="text-[10px] font-extrabold text-[#1565c0] bg-blue-100 border border-blue-300 px-2 py-0.5 rounded-full">SINKRON MUTASI KAS</span>
                         </div>
-                        <h2 className="text-3xl font-black text-white tracking-tight">
+                        <h2 className="text-3xl font-black text-[#1565c0] tracking-tight">
                           Rp {financialSummary.totalFisik.toLocaleString('id-ID')}
                         </h2>
 
-                        <div className="text-[11px] text-blue-100 border-t border-white/20 pt-2 space-y-1">
-                          <div className="flex justify-between items-center bg-white/15 p-1.5 rounded-lg border border-white/20">
-                            <span className="text-sky-200 font-medium">• Saldo Fisik Terakhir (Sheet):</span>
-                            <span className="font-bold text-white">Rp {saldoFisikTerakhir.toLocaleString('id-ID')}</span>
+                        <div className="text-[11px] text-slate-600 border-t border-blue-200 pt-2 space-y-1">
+                          <div className="flex justify-between items-center bg-blue-100/70 p-1.5 rounded-lg border border-blue-200">
+                            <span className="text-[#1565c0] font-medium">• Saldo Fisik Terakhir (Sheet):</span>
+                            <span className="font-bold text-[#1565c0]">Rp {saldoFisikTerakhir.toLocaleString('id-ID')}</span>
                           </div>
                           <div className="flex justify-between px-1.5 pt-1">
-                            <span className="text-blue-100">• Penjualan Tunai ({kasPeriod}):</span>
-                            <span className="font-bold text-sky-200">+Rp {financialSummary.totalCashIn.toLocaleString('id-ID')}</span>
+                            <span className="text-slate-500">• Penjualan Tunai ({kasPeriod}):</span>
+                            <span className="font-bold text-[#1565c0]">+Rp {financialSummary.totalCashIn.toLocaleString('id-ID')}</span>
                           </div>
                           <div className="flex justify-between px-1.5 pb-1">
-                            <span className="text-blue-100">• Belanja Operasional ({kasPeriod}):</span>
-                            <span className="font-bold text-rose-200">-Rp {financialSummary.totalExpenses.toLocaleString('id-ID')}</span>
+                            <span className="text-slate-500">• Belanja Operasional ({kasPeriod}):</span>
+                            <span className="font-bold text-rose-500">-Rp {financialSummary.totalExpenses.toLocaleString('id-ID')}</span>
                           </div>
-                          <p className="text-[9px] text-blue-200 italic px-1.5 pt-1 border-t border-white/20">Total kas laci fisik mengikuti mutlak data Saldo Fisik Terakhir dari Sheet Mutasi Kas.</p>
+                          <p className="text-[9px] text-slate-400 italic px-1.5 pt-1 border-t border-blue-200">Total kas laci fisik mengikuti mutlak data Saldo Fisik Terakhir dari Sheet Mutasi Kas.</p>
                         </div>
                       </div>
 
                       {/* SALDO QRIS / BANK LENGKAP DENGAN TOMBOL TARIK UANG (BISA JADI 0) */}
-                      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-white/20">
-                        <div className="bg-white/15 p-3 rounded-2xl border border-white/20">
-                          <span className="text-[10px] text-blue-100 font-bold block uppercase">Modal Kas Awal</span>
-                          <span className="text-lg font-black text-white">Rp {financialSummary.modalAwal.toLocaleString('id-ID')}</span>
+                      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200">
+                        <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                          <span className="text-[10px] text-slate-500 font-bold block uppercase">Modal Kas Awal</span>
+                          <span className="text-lg font-black text-slate-800">Rp {financialSummary.modalAwal.toLocaleString('id-ID')}</span>
                         </div>
                         
-                        <div className="bg-white/15 p-3 rounded-2xl border border-white/20 flex flex-col justify-between">
+                        <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 flex flex-col justify-between">
                           <div>
                             <div className="flex items-center justify-between">
-                              <span className="text-[10px] text-blue-100 font-bold block uppercase">Saldo QRIS / Bank</span>
-                              {qrisWithdrawn > 0 && <span className="text-[9px] text-sky-200 font-semibold">(Telah Ditarik)</span>}
+                              <span className="text-[10px] text-slate-500 font-bold block uppercase">Saldo QRIS / Bank</span>
+                              {qrisWithdrawn > 0 && <span className="text-[9px] text-sky-600 font-semibold">(Telah Ditarik)</span>}
                             </div>
-                            <span className="text-lg font-black text-sky-200 block mt-0.5">
+                            <span className="text-lg font-black text-[#1565c0] block mt-0.5">
                               Rp {financialSummary.totalQrisIn.toLocaleString('id-ID')}
                             </span>
                           </div>
@@ -2226,7 +2270,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                                 setWithdrawAmountInput(String(financialSummary.totalQrisIn));
                                 setIsWithdrawModalOpen(true);
                               }}
-                              className="w-full bg-white hover:bg-blue-50 text-[#1565c0] py-1.5 rounded-xl font-bold text-[11px] shadow transition active:scale-95"
+                              className="w-full bg-[#1565c0] hover:bg-blue-700 text-white py-1.5 rounded-xl font-bold text-[11px] shadow transition active:scale-95"
                             >
                               Tarik Uang (Cairkan)
                             </button>
@@ -2235,15 +2279,15 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 pt-2">
-                        <button onClick={handleOpenShiftModal} className="bg-sky-500 hover:bg-sky-400 text-white py-2.5 rounded-xl font-bold text-xs shadow flex items-center justify-center gap-1.5">
+                        <button onClick={handleOpenShiftModal} className="bg-[#1565c0] hover:bg-blue-700 text-white py-2.5 rounded-xl font-bold text-xs shadow flex items-center justify-center gap-1.5">
                           <RefreshCw className="w-4 h-4" /> Buka / Rekap Shift
                         </button>
-                        <button onClick={() => fetchAllDataFromSpreadsheet(true)} className="bg-white/15 hover:bg-white/25 text-white py-2.5 rounded-xl font-bold text-xs border border-white/25 flex items-center justify-center gap-1.5">
+                        <button onClick={() => fetchAllDataFromSpreadsheet(true)} className="bg-blue-50 hover:bg-blue-100 text-[#1565c0] py-2.5 rounded-xl font-bold text-xs border border-blue-200 flex items-center justify-center gap-1.5">
                           📋 Sinkronkan Sheets
                         </button>
                       </div>
 
-                      <div className="pt-2 border-t border-white/20">
+                      <div className="pt-2 border-t border-slate-200">
                         <button 
                           onClick={async () => {
                             setIsCleaningDuplicates(true);
@@ -2259,9 +2303,9 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                             }
                           }}
                           disabled={isCleaningDuplicates}
-                          className="w-full bg-white/15 hover:bg-white/25 text-sky-100 hover:text-white py-2.5 px-3 rounded-2xl font-bold text-xs border border-white/30 flex items-center justify-center gap-2 transition active:scale-95 shadow"
+                          className="w-full bg-blue-50 hover:bg-blue-100 text-[#1565c0] py-2.5 px-3 rounded-2xl font-bold text-xs border border-blue-200 flex items-center justify-center gap-2 transition active:scale-95 shadow-sm"
                         >
-                          <Sparkles className="w-4 h-4 text-sky-200" />
+                          <Sparkles className="w-4 h-4 text-[#1565c0]" />
                           <span>{isCleaningDuplicates ? 'Merapikan Database...' : '🧹 Bersihkan Data Member Ganda di Spreadsheet'}</span>
                         </button>
                       </div>
@@ -2284,7 +2328,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     {/* ========================================================================= */}
 
                     {/* 1. PENJUALAN MAKANAN */}
-                    <div className="bg-[#F5F9FF] border border-sky-200/70 rounded-3xl p-5 shadow-sm space-y-4">
+                    <div className="bg-[#F5F9FF] border border-sky-200/80 rounded-3xl p-5 shadow-sm space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-2xl bg-sky-500/20 text-sky-600 flex items-center justify-center font-bold text-lg">
@@ -2317,7 +2361,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     </div>
 
                     {/* 2. PENJUALAN MINUMAN */}
-                    <div className="bg-[#F0F7FF] border border-blue-200/70 rounded-3xl p-5 shadow-sm space-y-4">
+                    <div className="bg-[#EFF6FF] border border-blue-200/80 rounded-3xl p-5 shadow-sm space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-2xl bg-blue-500/20 text-[#1565c0] flex items-center justify-center font-bold text-lg">
@@ -2328,7 +2372,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                             <p className="text-[11px] text-slate-400">Coffee, Non-Coffee & Signature</p>
                           </div>
                         </div>
-                        <span className="text-xs font-black text-blue-700 bg-blue-100 px-2.5 py-1 rounded-full">
+                        <span className="text-xs font-black text-[#1565c0] bg-blue-100 px-2.5 py-1 rounded-full">
                           {salesBreakdown.drinkCups} cup
                         </span>
                       </div>
@@ -2387,7 +2431,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                               <th className="py-2.5 px-2 text-center">PORSI</th>
                               <th className="py-2.5 px-3 text-right">HARGA</th>
                               <th className="py-2.5 px-3 text-right">OMSET</th>
-                              <th className="py-2.5 px-4 text-right text-[#1565c0]">LABA @3RB</th>
+                              <th className="py-2.5 px-4 text-right text-sky-600">LABA @3RB</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 font-medium">
@@ -2402,7 +2446,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                                   <td className="py-2.5 px-2 text-center font-black text-sky-600">{item.qty}</td>
                                   <td className="py-2.5 px-3 text-right text-slate-500">Rp {item.price.toLocaleString('id-ID')}</td>
                                   <td className="py-2.5 px-3 text-right font-black text-slate-800">Rp {item.omset.toLocaleString('id-ID')}</td>
-                                  <td className="py-2.5 px-4 text-right font-bold text-[#1565c0]">Rp {(item.qty * 3000).toLocaleString('id-ID')}</td>
+                                  <td className="py-2.5 px-4 text-right font-bold text-sky-600">Rp {(item.qty * 3000).toLocaleString('id-ID')}</td>
                                 </tr>
                               ))
                             )}
@@ -2418,7 +2462,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                           <span>☕</span>
                           <span>Daftar Minuman Terjual</span>
                         </h4>
-                        <span className="text-[11px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                        <span className="text-[11px] font-bold text-[#1565c0] bg-blue-100 px-2 py-0.5 rounded-full">
                           {salesBreakdown.drinkItemsList.length} Produk
                         </span>
                       </div>
@@ -2482,7 +2526,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                             </p>
                           </div>
                           <div className="flex gap-1">
-                            <button onClick={() => setAdminPromoModal({ open: true, item: p })} className="p-2 text-[#1565c0] font-bold text-xs">Edit</button>
+                            <button onClick={() => setAdminPromoModal({ open: true, item: p })} className="p-2 text-sky-600 font-bold text-xs">Edit</button>
                             <button onClick={async () => {
                               showToast('Menghapus promo...');
                               await postToDatabase({ action: 'deletePromo', id: p.id });
@@ -2636,7 +2680,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                       <span>(-) Belanja Operasional Toko:</span>
                       <span className="font-bold">-Rp {currentShiftSummary.expenseTotal.toLocaleString('id-ID')}</span>
                     </div>
-                    <div className="bg-blue-50 p-2.5 rounded-xl flex justify-between items-center text-xs font-black text-[#1565c0] border border-blue-200/60">
+                    <div className="bg-sky-50 p-2.5 rounded-xl flex justify-between items-center text-xs font-black text-sky-800 border border-sky-200/80">
                       <span>(=) Sisa Uang Modal Kasir:</span>
                       <span>Rp {currentShiftSummary.sisaModalLaci.toLocaleString('id-ID')}</span>
                     </div>
@@ -2695,7 +2739,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     
                     <button 
                       onClick={handleCloseShift}
-                      className="w-full bg-blue-900 hover:bg-blue-950 text-white py-3 rounded-2xl font-bold text-xs shadow-md flex items-center justify-center gap-2 active:scale-95 transition"
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-2xl font-bold text-xs shadow-md flex items-center justify-center gap-2 active:scale-95 transition"
                     >
                       <span>☁ Tutup Shift & Simpan ke Sheets</span>
                     </button>
@@ -2908,7 +2952,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     </div>
                     <div className="flex justify-between items-center text-xs pt-1 border-t">
                       <span className="font-bold text-slate-500">Kembalian:</span>
-                      <span className="font-black text-[#1565c0] text-sm">Rp {posChange.toLocaleString('id-ID')}</span>
+                      <span className="font-black text-sky-600 text-sm">Rp {posChange.toLocaleString('id-ID')}</span>
                     </div>
                   </div>
                 )}
@@ -2976,10 +3020,10 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                 </div>
 
                 <div className="flex gap-2">
-                  <button onClick={() => window.print()} className="flex-1 bg-[#1565c0] text-white font-bold py-2.5 rounded-xl shadow text-xs flex items-center justify-center gap-1.5">
-                    <Printer className="w-4 h-4 text-sky-200" /> Cetak Thermal
+                  <button onClick={() => window.print()} className="flex-1 bg-slate-800 text-white font-bold py-2.5 rounded-xl shadow text-xs flex items-center justify-center gap-1.5">
+                    <Printer className="w-4 h-4 text-sky-300" /> Cetak Thermal
                   </button>
-                  <button onClick={() => { handleClaimQR(activeOrderReceipt.qrReceiptCode); setActiveOrderReceipt(null); }} className="flex-1 bg-sky-500 text-white font-bold py-2.5 rounded-xl shadow text-xs flex items-center justify-center gap-1">
+                  <button onClick={() => { handleClaimQR(activeOrderReceipt.qrReceiptCode); setActiveOrderReceipt(null); }} className="flex-1 bg-[#1565c0] text-white font-bold py-2.5 rounded-xl shadow text-xs flex items-center justify-center gap-1">
                     <QrCode className="w-4 h-4" /> Klaim Poin
                   </button>
                 </div>
@@ -3138,7 +3182,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
               <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl">
                 <div className="relative h-48">
                   <img src={selectedProduct.image} alt={selectedProduct.name} className="w-full h-full object-cover" />
-                  <button onClick={() => setSelectedProduct(null)} className="absolute top-3 right-3 bg-white/90 text-slate-800 p-2 rounded-full shadow"><X className="w-5 h-5" /></button>
+                  <button onClick={() => setSelectedProduct(null)} className="absolute top-3 right-3 bg-white/90 text-slate-700 p-2 rounded-full shadow"><X className="w-5 h-5" /></button>
                 </div>
                 <div className="p-6 space-y-4">
                   <div><h3 className="text-xl font-bold">{selectedProduct.name}</h3><p className="text-xs text-slate-500 mt-1">{selectedProduct.desc}</p></div>
@@ -3188,7 +3232,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                         <div key={item.cartItemId} className="bg-slate-50 p-3 rounded-2xl flex justify-between items-center">
                           <div>
                             <h4 className="font-bold text-sm">{item.name}</h4>
-                            <span className="text-[10px] text-[#1565c0] font-bold">{item.sugarLevel}</span>
+                            <span className="text-[10px] text-sky-600 font-bold">{item.sugarLevel}</span>
                             {item.notes && <p className="text-[10px] text-slate-400 italic">"{item.notes}"</p>}
                             <p className="text-xs font-black text-[#1565c0] mt-0.5">Rp {(item.price * item.qty).toLocaleString('id-ID')}</p>
                           </div>
@@ -3202,6 +3246,33 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     )
                   ) : (
                     <div className="space-y-4">
+                      {/* Pilihan Layanan: Diantar vs Ambil di Kasir */}
+                      <div className="bg-blue-50 border border-blue-200 p-3.5 rounded-2xl space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-extrabold text-[#1565c0]">Metode Penerimaan Pesanan</span>
+                          <button
+                            type="button"
+                            onClick={() => { setPendingProductAction(false); setIsDeliveryModalOpen(true); }}
+                            className="text-[11px] font-bold text-[#1565c0] bg-white px-2.5 py-1 rounded-lg border border-blue-300 shadow-sm hover:bg-blue-50"
+                          >
+                            Ubah Pilihan
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2.5 bg-white p-2.5 rounded-xl border border-blue-100">
+                          <span className="text-lg">{deliveryMethod === 'Diantar' ? '🛵' : '🏪'}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-black text-slate-800">
+                              {deliveryMethod === 'Diantar' ? 'DIANTAR (Delivery)' : 'JEMPUT (Ambil di Kasir)'}
+                            </p>
+                            {deliveryMethod === 'Diantar' && (
+                              <p className="text-[11px] text-slate-500 truncate">
+                                {deliveryAddress ? `Alamat: ${deliveryAddress}` : 'Alamat pengantaran belum diisi'}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
                       <div className="bg-blue-500/10 border border-blue-500/30 p-3.5 rounded-2xl space-y-3">
                         <div className="flex justify-between items-center text-xs font-bold text-[#1565c0]">
                           <span className="flex items-center gap-1.5">
@@ -3218,7 +3289,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                         </div>
 
                         {selectedVoucher ? (
-                          <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-blue-500 shadow-sm">
+                          <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-[#1565c0] shadow-sm">
                             <div className="flex items-center gap-2">
                               <div className="w-8 h-8 rounded-lg bg-blue-100 text-[#1565c0] flex items-center justify-center font-bold">
                                 <Ticket className="w-4 h-4" />
@@ -3287,7 +3358,7 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                                       key={v.id || idx}
                                       className={`p-2.5 rounded-xl border transition flex items-center justify-between gap-2 ${
                                         isCurrentSelected
-                                          ? 'bg-blue-50 border-blue-500 shadow-sm'
+                                          ? 'bg-blue-50 border-[#1565c0] shadow-sm'
                                           : 'bg-white border-slate-200 hover:border-[#1565c0]'
                                       }`}
                                     >
@@ -3351,10 +3422,102 @@ Laporan otomatis dibuat dari POS Pintar Ruang Seduh`;
                     {checkoutStep === 'cart' ? (
                       <button onClick={() => setCheckoutStep('payment')} className="w-full bg-[#1565c0] text-white py-3.5 rounded-xl font-bold text-sm shadow">Lanjut ke Pembayaran</button>
                     ) : (
-                      <button onClick={handleProcessCheckout} className="w-full bg-sky-500 text-white py-3.5 rounded-xl font-extrabold text-sm shadow">Konfirmasi Pesanan (Bayar di Kasir)</button>
+                      <button onClick={handleProcessCheckout} className="w-full bg-sky-500 text-white py-3.5 rounded-xl font-extrabold text-sm shadow">
+                        {deliveryMethod === 'Diantar' ? 'Konfirmasi Pesanan (Diantar)' : 'Konfirmasi Pesanan (Ambil di Kasir)'}
+                      </button>
                     )}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* MODAL POPUP PILIH DIANTAR ATAU AMBIL DI KASIR */}
+          {isDeliveryModalOpen && (
+            <div className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white border border-slate-200 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative">
+                <button
+                  type="button"
+                  onClick={() => { setIsDeliveryModalOpen(false); setPendingProductAction(false); }}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                <div className="text-center space-y-1">
+                  <div className="w-12 h-12 rounded-2xl bg-blue-50 text-[#1565c0] mx-auto flex items-center justify-center text-2xl shadow-inner">
+                    🛵
+                  </div>
+                  <h3 className="font-extrabold text-base text-slate-800">Pilih Layanan Pesanan</h3>
+                  <p className="text-xs text-slate-500">Pesanan Anda ingin diantar atau diambil langsung di kasir?</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryMethod('Diantar')}
+                    className={`p-4 rounded-2xl border-2 text-center transition flex flex-col items-center gap-1.5 ${
+                      deliveryMethod === 'Diantar'
+                        ? 'border-[#1565c0] bg-blue-50 text-[#1565c0] shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300'
+                    }`}
+                  >
+                    <span className="text-2xl">🛵</span>
+                    <span className="font-extrabold text-xs">Diantar</span>
+                    <span className="text-[10px] text-slate-400">Antar ke lokasi</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryMethod('Ambil di Kasir')}
+                    className={`p-4 rounded-2xl border-2 text-center transition flex flex-col items-center gap-1.5 ${
+                      deliveryMethod === 'Ambil di Kasir'
+                        ? 'border-[#1565c0] bg-blue-50 text-[#1565c0] shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300'
+                    }`}
+                  >
+                    <span className="text-2xl">🏪</span>
+                    <span className="font-extrabold text-xs">Ambil di Kasir</span>
+                    <span className="text-[10px] text-slate-400">Jemput di kedai</span>
+                  </button>
+                </div>
+
+                {deliveryMethod === 'Diantar' && (
+                  <div className="space-y-1.5 pt-1">
+                    <label className="text-[11px] font-bold text-slate-600 block">Alamat / Lokasi Pengantaran *</label>
+                    <textarea
+                      rows={2}
+                      value={deliveryAddress}
+                      onChange={(e) => setDeliveryAddress(e.target.value)}
+                      placeholder="Contoh: Jl. Merdeka No. 12 / Depan Indomaret..."
+                      className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs outline-none focus:ring-2 focus:ring-[#1565c0]"
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!deliveryMethod) {
+                      showToast('Pilih Diantar atau Ambil di Kasir terlebih dahulu!', 'error');
+                      return;
+                    }
+                    if (deliveryMethod === 'Diantar' && !deliveryAddress.trim()) {
+                      showToast('Masukkan alamat/lokasi pengantaran terlebih dahulu!', 'error');
+                      return;
+                    }
+                    setIsDeliveryModalOpen(false);
+                    if (pendingProductAction) {
+                      setPendingProductAction(false);
+                      executeAddToCart(deliveryMethod);
+                    } else {
+                      showToast(`Layanan diubah ke: ${deliveryMethod === 'Diantar' ? 'ANTAR' : 'JEMPUT'}`);
+                    }
+                  }}
+                  className="w-full bg-[#1565c0] hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-xs shadow-lg transition"
+                >
+                  {pendingProductAction ? 'Simpan & Tambah ke Keranjang' : 'Simpan Pilihan Layanan'}
+                </button>
               </div>
             </div>
           )}
